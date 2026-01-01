@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wario-Web Ultimate</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+<style>
+body{margin:0;background:#000;color:#fff;font-family:Arial;overflow:hidden}
+canvas{display:block;margin:auto}
+#hud{position:absolute;top:10px;left:10px}
+#rule{position:absolute;top:42%;width:100%;text-align:center;font-size:32px}
+#startScreen{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:10}
+button{font-size:24px;padding:15px 40px}
+.flash{animation:flash .25s}
+@keyframes flash{from{background:#fff}to{background:#000}}
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <h1>🎮 WARIO-WEB ULTIMATE</h1>
+  <button id="startBtn">START</button>
+  <p style="font-size:14px">Tilt to move · Tap / Space</p>
+</div>
+
+<div id="hud">
+  Score: <span id="score">0</span><br>
+  Lives: <span id="lives">❤️❤️❤️❤️</span>
+</div>
+<div id="rule"></div>
+<canvas id="game" width="360" height="640"></canvas>
+
+<script>
+/* CORE */
+const c=document.getElementById("game"),x=c.getContext("2d");
+const rule=document.getElementById("rule"),scoreEl=document.getElementById("score");
+const livesEl=document.getElementById("lives"),startBtn=document.getElementById("startBtn");
+const startScreen=document.getElementById("startScreen");
+
+let running=false,keys={},score=0,lives=4,timer=0,duration=220,game=null;
+const player={x:180,y:520,r:15}; let enemies=[];
+
+/* INPUT */
+addEventListener("keydown",e=>keys[e.key]=true);
+addEventListener("keyup",e=>keys[e.key]=false);
+c.addEventListener("pointerdown",()=>keys[" "]=true);
+
+/* AUDIO */
+let audio;
+function sfx(f=400,t=.1){
+  if(!audio) return;
+  const o=audio.createOscillator(),g=audio.createGain();
+  o.frequency.value=f; o.connect(g); g.connect(audio.destination);
+  o.start(); g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+t);
+  o.stop(audio.currentTime+t);
+}
+
+/* GYRO */
+let gyro={x:0,y:0};
+function enableGyro(){
+  const attach=()=>addEventListener("deviceorientation",e=>{
+    gyro.x+=((e.gamma||0)-gyro.x)*.15;
+    gyro.y+=((e.beta||0)-gyro.y)*.15;
+  });
+  if(DeviceOrientationEvent?.requestPermission)
+    DeviceOrientationEvent.requestPermission().then(r=>r==="granted"&&attach());
+  else attach();
+}
+
+/* HELPERS */
+const hit=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<a.r+b.r;
+function fail(){ lives--; sfx(120);
+  livesEl.textContent="❤️".repeat(lives);
+  lives<=0?location.reload():startGame();
+}
+function win(){ score++; sfx(700); scoreEl.textContent=score; startGame(); }
+
+/* MICROGAMES */
+const games=[];
+const add=(t,i,u)=>games.push({t,i,u});
+
+add("DODGE!",()=>enemies=[{x:Math.random()*360,y:-20,s:3+score*.05}],
+()=>enemies.forEach(e=>{e.y+=e.s;if(hit(player,{x:e.x,y:e.y,r:15}))fail()}));
+
+add("TAP!",()=>{},()=>keys[" "]&&(keys[" "]=0,win()));
+
+add("HOLD CENTER!",()=>game.t=60,()=>{
+  Math.abs(player.x-180)<8?--game.t<=0&&win():game.t=60;
+});
+
+add("LEVEL IT!",()=>game.t=60,()=>{
+  Math.abs(gyro.x)<4&&Math.abs(gyro.y)<4?--game.t<=0&&win():game.t=60;
+});
+
+add("REMEMBER!",()=>{game.pos=Math.random()*300+30;game.show=60},
+()=>game.show>0?game.show--:Math.abs(player.x-game.pos)<15&&win());
+
+add("BOSS!",()=>{
+  enemies=[];for(let i=0;i<6;i++)
+    enemies.push({x:Math.random()*360,y:-i*80,s:4+score*.08});
+},()=>enemies.forEach(e=>{e.y+=e.s;if(hit(player,{x:e.x,y:e.y,r:15}))fail()}));
+
+/* ENGINE */
+function startGame(){
+  timer=0; enemies=[];
+  duration=Math.max(140,220-score*2);
+  game=games[Math.floor(Math.random()*games.length)];
+  game.i(); rule.textContent=game.t;
+  document.body.classList.add("flash");
+  setTimeout(()=>document.body.classList.remove("flash"),250);
+}
+
+function update(){
+  if(!game)return;
+  player.x+=gyro.x*.08;
+  if(keys.ArrowLeft)player.x-=4;
+  if(keys.ArrowRight)player.x+=4;
+  player.x=Math.max(20,Math.min(340,player.x));
+  game.u(); if(++timer>duration)win();
+}
+
+function draw(){
+  x.clearRect(0,0,360,640);
+  x.fillStyle="lime";x.beginPath();x.arc(player.x,player.y,15,0,7);x.fill();
+  enemies.forEach(e=>{x.fillStyle="red";x.beginPath();x.arc(e.x,e.y,15,0,7);x.fill()});
+  if(game?.pos&&game.show>0){x.fillStyle="yellow";x.fillRect(game.pos-10,300,20,20)}
+}
+
+(function loop(){running&&(update(),draw());requestAnimationFrame(loop)})();
+
+/* START */
+startBtn.onclick=()=>{
+  audio=new (AudioContext||webkitAudioContext)();
+  enableGyro(); startScreen.style.display="none";
+  running=true; startGame();
+};
+
+/* SERVICE WORKER */
+if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js");
+</script>
+</body>
+</html>
